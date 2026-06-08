@@ -1,0 +1,65 @@
+# ---- .NET build output ----
+bin/
+obj/
+out/
+publish/
+[Dd]ebug/
+[Rr]elease/
+[Bb]in/
+[Oo]bj/
+*.dll
+*.pdb
+*.exe
+
+# Build / test artifacts
+[Tt]est[Rr]esults/
+*.trx
+*.coverage
+*.coverlet.json
+coverage*.json
+coverage*.xml
+coverage*.cobertura.xml
+.vs/
+project.lock.json
+project.assets.json
+*.nupkg
+*.snupkg
+
+# ---- EF Core ----
+# Migrations are source — keep them. Only ignore generated SQL dumps.
+*.sql.bak
+
+# ---- IDE / editor ----
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.DotSettings.user
+
+# ---- Claude Code (per-developer) ----
+.claude/settings.local.json
+
+# ---- OS noise ----
+.DS_Store
+Thumbs.db
+*~
+
+# ---- Local config / secrets ----
+# Keep committed appsettings.json / appsettings.Development.json (no real secrets here),
+# but never commit per-developer overrides or user-secrets dumps.
+appsettings.*.local.json
+secrets.json
+*.env
+.env
+.env.local
+
+# ---- Logs ----
+*.log
+logs/
+
+# ---- Local-only reference docs (not committed) ----
+requirements.md
+docs/

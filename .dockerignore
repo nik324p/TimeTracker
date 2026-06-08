@@ -1,0 +1,24 @@
+# Keep host build artifacts out of the Docker build context. Without this, `COPY . .`
+# leaks local bin/obj (and their project.assets.json) into the image, where they collide
+# with the container's own `dotnet restore` and fail publish with NETSDK1064.
+**/bin/
+**/obj/
+**/out/
+**/publish/
+
+# VCS / IDE / OS noise
+.git/
+.gitignore
+.vs/
+.vscode/
+.idea/
+**/.DS_Store
+
+# Docs & local tooling not needed to build the images
+*.md
+docs/
+.claude/
+
+# Never ship local secrets / env overrides
+**/appsettings.*.local.json
+**/*.user

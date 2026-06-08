@@ -1,0 +1,15 @@
+@* Period filter dropdown. Wire tokens match the API's StatisticsPeriod converter. Two-way: @bind-Value. *@
+
+<select class="form-select d-inline-block w-auto" value="@Value" @onchange="OnChange">
+    <option value="week">week</option>
+    <option value="month">month</option>
+    <option value="year">year</option>
+    <option value="entire period">entire period</option>
+</select>
+
+@code {
+    [Parameter] public string Value { get; set; } = "month";
+    [Parameter] public EventCallback<string> ValueChanged { get; set; }
+
+    private Task OnChange(ChangeEventArgs e) => ValueChanged.InvokeAsync(e.Value?.ToString() ?? "month");
+}

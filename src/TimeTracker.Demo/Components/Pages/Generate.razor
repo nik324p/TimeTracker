@@ -1,0 +1,214 @@
+@page "/generate"
+@rendermode InteractiveServer
+@inject TimeTrackerApiClient Api
+@inject RequestLog Log
+
+<PageTitle>TimeTracker — Generate</PageTitle>
+<h1>Generate Data</h1>
+<p class="text-muted">Seed the system so the Admin Panel has something to read.</p>
+
+@if (_seeding == Seeding.Enabled)
+{
+    <div class="alert alert-success py-2">
+        <strong>Dev seeding enabled.</strong> Backfill lays down real multi-day history via <code>/dev/seed_tap</code>.
+    </div>
+}
+else if (_seeding == Seeding.Disabled)
+{
+    <div class="alert alert-warning py-2">
+        <strong>Dev seeding disabled</strong> (the <code>/dev/*</code> endpoints returned 404). Only live same-day
+        taps work — history shows <em>today</em> only. Enable by running the API in Development or with
+        <code>EnableSeedEndpoints=true</code>.
+    </div>
+}
+else
+{
+    <div class="alert alert-secondary py-2">Checking seeding availability…</div>
+}
+
+<section class="add-user mb-4">
+    <h2>Add one user</h2>
+    <p class="text-muted mb-2">create_user → assign card → set a 09:00–18:00 Mon–Fri schedule. That trio <em>is</em> "create user".</p>
+    <label class="me-2">user_id <input type="number" class="form-control d-inline-block w-auto" @bind="_userId" /></label>
+    <label class="me-2">card_uid <input class="form-control d-inline-block w-auto" @bind="_cardUid" /></label>
+    <button class="btn btn-outline-secondary" disabled="@_busy" @onclick="() => _cardUid = RandomCardUid()">Random</button>
+    <button class="btn btn-primary ms-2" disabled="@_busy" @onclick="AddOneUser">Add user</button>
+</section>
+
+<section class="bulk mb-4">
+    <h2>Bulk generate</h2>
+    <p class="text-muted mb-2">N users from a starting id, each with a random card, schedule, and D days of backfilled attendance.</p>
+    <label class="me-2">count <input type="number" class="form-control d-inline-block w-auto" @bind="_bulkCount" /></label>
+    <label class="me-2">days <input type="number" class="form-control d-inline-block w-auto" @bind="_bulkDays" /></label>
+    <label class="me-2">start id <input type="number" class="form-control d-inline-block w-auto" @bind="_bulkStartId" /></label>
+    <button class="btn btn-primary" disabled="@_busy" @onclick="BulkGenerate">Generate</button>
+</section>
+
+<section class="backfill mb-4">
+    <h2>Backfill attendance</h2>
+    <p class="text-muted mb-2">Seed D weekdays of arrivals/departures (some late / early) for an existing card.</p>
+    <label class="me-2">card_uid <input class="form-control d-inline-block w-auto" @bind="_backfillCard" /></label>
+    <label class="me-2">days <input type="number" class="form-control d-inline-block w-auto" @bind="_backfillDays" /></label>
+    <button class="btn btn-primary" disabled="@_busy || _seeding != Seeding.Enabled" @onclick="BackfillClick">Backfill</button>
+</section>
+
+<section class="tap-sim mb-4">
+    <h2>Tap simulator / primitives</h2>
+    <p class="text-muted mb-2">Act against one user_id + card_uid. "Tap again" deliberately triggers the API's 409.</p>
+    <label class="me-2">user_id <input type="number" class="form-control d-inline-block w-auto" @bind="_simUserId" /></label>
+    <label class="me-2">card_uid <input class="form-control d-inline-block w-auto" @bind="_simCard" /></label>
+    <div class="mt-2">
+        <button class="btn btn-outline-primary me-1" disabled="@_busy" @onclick="SimAssign">Assign card</button>
+        <button class="btn btn-outline-primary me-1" disabled="@_busy" @onclick="SimSetSchedule">Set schedule</button>
+        <button class="btn btn-outline-success me-1" disabled="@_busy" @onclick="SimTap">Tap (now)</button>
+        <button class="btn btn-outline-danger" disabled="@_busy" @onclick="SimTap">Tap AGAIN (cause 409)</button>
+    </div>
+</section>
+
+@code {
+    private enum Seeding { Unknown, Enabled, Disabled }
+
+    private const long ProbeUserId = 90_000_001;
+
+    private long _userId = 1001;
+    private string _cardUid = "";
+    private int _bulkCount = 5;
+    private int _bulkDays = 5;
+    private long _bulkStartId = 2001;
+    private string _backfillCard = "";
+    private int _backfillDays = 5;
+    private long _simUserId = 1001;
+    private string _simCard = "";
+    private bool _busy;
+    private Seeding _seeding = Seeding.Unknown;
+
+    private static readonly DayOfWeek[] WeekdaysMonFri =
+    [
+        DayOfWeek.Monday, DayOfWeek.Tuesday, DayOfWeek.Wednesday, DayOfWeek.Thursday, DayOfWeek.Friday
+    ];
+
+    private static string RandomCardUid() =>
+        Convert.ToHexString(Guid.NewGuid().ToByteArray().AsSpan(0, 5)); // 10-hex-char uid
+
+    // Probe whether the env-gated /dev endpoints are live (idempotent reserved-id create).
+    protected override async Task OnInitializedAsync()
+    {
+        var r = await Api.CreateUserAsync(new(ProbeUserId, "seed-probe"));
+        _seeding = r.IsSuccess ? Seeding.Enabled : r.StatusCode == 404 ? Seeding.Disabled : Seeding.Unknown;
+    }
+
+    // ---- Add one user (create_user → assign → schedule) ----
+    private async Task AddOneUser()
+    {
+        if (_busy) { return; }
+        if (string.IsNullOrWhiteSpace(_cardUid)) { _cardUid = RandomCardUid(); }
+        var card = _cardUid;
+        var id = _userId;
+
+        await Run("create_user", () => Api.CreateUserAsync(new(id)), r => $"u{id} ({(r.Created ? "new" : "existed")})");
+        await Run("assign", () => Api.AssignCardAsync(new(id, card)), _ => $"u{id} ← {card}");
+        await Run("schedule", () => Api.SetWorkTimeAsync(DefaultSchedule(id)), _ => "09:00–18:00 Mon–Fri");
+    }
+
+    // ---- Bulk generate ----
+    private async Task BulkGenerate()
+    {
+        if (_busy) { return; }
+        _busy = true;
+        try
+        {
+            for (var i = 0; i < _bulkCount; i++)
+            {
+                var id = _bulkStartId + i;
+                var card = RandomCardUid();
+
+                var created = await Api.CreateUserAsync(new(id));
+                var assigned = await Api.AssignCardAsync(new(id, card));
+                var scheduled = await Api.SetWorkTimeAsync(DefaultSchedule(id));
+
+                if (!created.IsSuccess || !assigned.IsSuccess || !scheduled.IsSuccess)
+                {
+                    var err = created.ErrorMessage ?? assigned.ErrorMessage ?? scheduled.ErrorMessage;
+                    Log.Add($"bulk: FAILED at u{id} — {err}");
+                    break;
+                }
+
+                var seeded = await Backfill(card, _bulkDays);
+                Log.Add($"bulk: u{id} ← {card}, {seeded} taps · {i + 1}/{_bulkCount}");
+                _bulkStartId = id + 1; // advance so a re-run doesn't collide
+                StateHasChanged();
+            }
+        }
+        finally { _busy = false; }
+    }
+
+    // ---- Backfill ----
+    private async Task BackfillClick()
+    {
+        if (_busy || string.IsNullOrWhiteSpace(_backfillCard)) { return; }
+        _busy = true;
+        try
+        {
+            var seeded = await Backfill(_backfillCard, _backfillDays);
+            Log.Add($"backfill: {_backfillCard} → {seeded} taps over {_backfillDays} days");
+        }
+        finally { _busy = false; }
+    }
+
+    // Seeds up to `days` weekdays of arrival/departure (some late / early). Returns taps recorded.
+    private async Task<int> Backfill(string card, int days)
+    {
+        var today = DateTimeOffset.Now.Date;
+        var taps = 0;
+        for (var d = days; d >= 1; d--)
+        {
+            var day = today.AddDays(-d);
+            if (day.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday) { continue; }
+
+            var arrival = new DateTimeOffset(day.AddHours(9).AddMinutes(d % 3 == 0 ? 25 : 0));   // some late
+            var departure = new DateTimeOffset(day.AddHours(d % 4 == 0 ? 16 : 18));               // some early
+
+            var a = await Api.SeedTapAsync(new(card, arrival, "arrival"));
+            if (a.StatusCode == 404) { _seeding = Seeding.Disabled; Log.Add("seed_tap: disabled (404) — stopping backfill"); break; }
+            if (a.IsSuccess) { taps++; }
+
+            var dep = await Api.SeedTapAsync(new(card, departure, "departure"));
+            if (dep.IsSuccess) { taps++; }
+        }
+        return taps;
+    }
+
+    // ---- Tap simulator / primitives ----
+    private Task SimAssign() =>
+        Run("assign", () => Api.AssignCardAsync(new(_simUserId, EnsureSimCard())), r => $"{r.CardUid} → u{r.UserId}");
+
+    private Task SimSetSchedule() =>
+        Run("schedule", () => Api.SetWorkTimeAsync(DefaultSchedule(_simUserId)), _ => "09:00–18:00 Mon–Fri");
+
+    private Task SimTap() =>
+        Run("touch", () => Api.TouchCardAsync(new(EnsureSimCard())), r => $"{r.CardUid} (u{r.UserId})");
+
+    private string EnsureSimCard()
+    {
+        if (string.IsNullOrWhiteSpace(_simCard)) { _simCard = RandomCardUid(); }
+        return _simCard;
+    }
+
+    private static SetWorkTimeRequest DefaultSchedule(long userId) =>
+        new(userId, new TimeOnly(9, 0), new TimeOnly(18, 0), WeekdaysMonFri, false);
+
+    // Shared runner: success → describe + log; failure → log the API's ProblemDetails.
+    private async Task Run<T>(string label, Func<Task<ApiResult<T>>> call, Func<T, string> onOk)
+    {
+        if (_busy) { return; }
+        _busy = true;
+        try
+        {
+            var result = await call();
+            Log.Add(result.IsSuccess
+                ? $"{label}: OK — {onOk(result.Value!)}"
+                : $"{label}: FAILED [{result.StatusCode}] {result.ErrorMessage}");
+        }
+        finally { _busy = false; }
+    }
+}

@@ -1,0 +1,40 @@
+@* Renders one UserStatisticsResponse as an instrument readout (API reports minutes → hours). *@
+
+@if (Stats is not null)
+{
+    <div class="stat-card">
+        <div class="stat-card-head">
+            <span class="stat-user">USER @Stats.UserId</span>
+            <span class="stat-filter">@Stats.Filter</span>
+        </div>
+        <div class="stat-range">
+            @(Stats.FromDate?.ToString("yyyy-MM-dd") ?? "(start)") → @Stats.ToDate.ToString("yyyy-MM-dd")
+        </div>
+
+        <div class="stat-grid">
+            <div class="stat-metric">
+                <span class="sm-val">@Format.Hours(Stats.RequiredMinutes)</span>
+                <span class="sm-lab">required</span>
+            </div>
+            <div class="stat-metric">
+                <span class="sm-val">@Format.Hours(Stats.WorkedMinutes)</span>
+                <span class="sm-lab">worked</span>
+            </div>
+            <div class="stat-metric stat-deficit">
+                <span class="sm-val">@Format.Hours(Stats.UnderworkedMinutes)</span>
+                <span class="sm-lab">under-worked</span>
+            </div>
+        </div>
+
+        <div class="stat-flags">
+            <span class="chip chip-bad">late @Stats.LateWithoutReason</span>
+            <span class="chip chip-warn">late·excused @Stats.LateWithReason</span>
+            <span class="chip chip-bad">early @Stats.LeftEarlyWithoutReason</span>
+            <span class="chip chip-warn">early·excused @Stats.LeftEarlyWithReason</span>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public UserStatisticsResponse? Stats { get; set; }
+}

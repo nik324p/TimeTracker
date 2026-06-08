@@ -1,0 +1,28 @@
+@inherits LayoutComponentBase
+
+<div class="page">
+    <aside class="rail">
+        <NavMenu />
+    </aside>
+
+    <main class="stage">
+        <header class="stage-head">
+            <div class="stage-head-id">TIMECLOCK · OPS CONSOLE</div>
+            <div class="stage-head-meta">NFC ATTENDANCE — v1</div>
+        </header>
+
+        <article class="content">
+            @Body
+        </article>
+
+        <footer class="console">
+            <RequestLogPanel />
+        </footer>
+    </main>
+</div>
+
+<div id="blazor-error-ui" data-nosnippet>
+    An unhandled error has occurred.
+    <a href="." class="reload">Reload</a>
+    <span class="dismiss">🗙</span>
+</div>

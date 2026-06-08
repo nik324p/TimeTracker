@@ -1,0 +1,264 @@
+@page "/"
+@page "/admin"
+@rendermode InteractiveServer
+@inject TimeTrackerApiClient Api
+@inject RequestLog Log
+
+<PageTitle>TimeTracker — Admin</PageTitle>
+<h1>Admin Panel</h1>
+<p class="text-muted">Read &amp; manage one worker — set the User ID below (or pick one from <em>List users</em>).</p>
+
+<section class="user mb-4">
+    <h2>User</h2>
+    <label class="me-3"><strong>User ID</strong>
+        <input type="number" class="form-control d-inline-block w-auto" @bind="_userId" />
+    </label>
+
+    <div class="mt-2">
+        <label class="me-2">max <input type="number" min="1" max="1000" class="form-control d-inline-block w-auto" @bind="_usersLimit" /></label>
+        <button class="btn btn-primary" disabled="@_busy" @onclick="ListUsers">List users</button>
+    </div>
+    @if (_users is not null)
+    {
+        @if (_users.Count == 0)
+        {
+            <p class="text-muted mt-2"><em>No users found — seed some on the Generate tab.</em></p>
+        }
+        else
+        {
+            <div class="card-chips">
+                @foreach (var id in _users)
+                {
+                    <button type="button" disabled="@_busy"
+                            class="uid-chip @(id == _userId ? "uid-chip-active" : null)"
+                            @onclick="() => _userId = id">@id</button>
+                }
+            </div>
+        }
+    }
+</section>
+
+<section class="schedule mb-4">
+    <h2>Schedule</h2>
+    <button class="btn btn-primary" disabled="@_busy" @onclick="GetSchedule">Get schedule</button>
+    @if (_schedule is not null)
+    {
+        <p class="mt-2">
+            @_schedule.StartTime.ToString("HH:mm")–@_schedule.EndTime.ToString("HH:mm"),
+            days [@string.Join(", ", _schedule.Days)],
+            free: @_schedule.FreeSchedule
+        </p>
+    }
+
+    <div class="set-schedule mt-2">
+        <label class="me-2">start <input type="time" @bind="_startTime" /></label>
+        <label class="me-2">end <input type="time" @bind="_endTime" /></label>
+        <label class="me-2"><input type="checkbox" @bind="_freeSchedule" /> free schedule</label>
+        <div class="my-2">
+            @foreach (var d in AllDays)
+            {
+                <label class="me-2">
+                    <input type="checkbox" checked="@_days.Contains(d)"
+                           @onchange="e => ToggleDay(d, (bool)e.Value!)" /> @d
+                </label>
+            }
+        </div>
+        <button class="btn btn-outline-primary" disabled="@_busy" @onclick="SetSchedule">Set schedule</button>
+    </div>
+</section>
+
+<section class="exclusions mb-4">
+    <h2>Exclusions</h2>
+    <button class="btn btn-primary" disabled="@_busy" @onclick="LoadExclusions">Load exclusions</button>
+    <ExclusionsTable Exclusions="_exclusions" />
+
+    <div class="add-exclusion mt-2">
+        <select class="form-select d-inline-block w-auto" @bind="_exclusionType">
+            <option value="arrive later">arrive later</option>
+            <option value="leave earlier">leave earlier</option>
+            <option value="full working day">full working day</option>
+        </select>
+        <label class="ms-2 me-2">from <input type="datetime-local" @bind="_exclStart" /></label>
+        <label class="me-2">to <input type="datetime-local" @bind="_exclEnd" /></label>
+        <button class="btn btn-outline-primary" disabled="@_busy" @onclick="AddExclusion">Add exclusion</button>
+    </div>
+</section>
+
+<section class="cards mb-4">
+    <h2>Cards</h2>
+    <button class="btn btn-primary" disabled="@_busy" @onclick="ListCards">List cards</button>
+    <CardChips Cards="_cards" />
+
+    <div class="mt-2">
+        <label class="me-2">card_uid <input class="form-control d-inline-block w-auto" @bind="_deleteCardUid" /></label>
+        <button class="btn btn-outline-danger" disabled="@_busy" @onclick="DeleteCard">Delete card</button>
+        <button class="btn btn-outline-danger ms-2" disabled="@_busy" @onclick="DeleteAllCards">Delete all cards</button>
+    </div>
+</section>
+
+<section class="history mb-4">
+    <h2>History</h2>
+    <PeriodSelect @bind-Value="_historyUserFilter" />
+    <button class="btn btn-primary ms-2" disabled="@_busy" @onclick="HistoryUser">History (this user)</button>
+    <HistoryTable History="_historyUser" />
+</section>
+
+<section class="statistics mb-4">
+    <h2>Statistics</h2>
+    <PeriodSelect @bind-Value="_statsUserFilter" />
+    <button class="btn btn-primary ms-2" disabled="@_busy" @onclick="LoadStatistics">Stats (this user)</button>
+    @if (_stats is not null) { <StatisticsCard Stats="_stats" /> }
+</section>
+
+<section class="history-all mb-4">
+    <h2>History · All Workers</h2>
+    <label class="me-2">max rows <input type="number" min="1" max="1000" class="form-control d-inline-block w-auto" @bind="_historyAllLimit" /></label>
+    <PeriodSelect @bind-Value="_historyAllFilter" />
+    <button class="btn btn-primary ms-2" disabled="@_busy" @onclick="HistoryAll">Load history (all)</button>
+    <HistoryTable History="_historyAll" ShowUser="true" />
+</section>
+
+<section class="statistics-all mb-4">
+    <h2>Statistics · All Workers</h2>
+    <label class="me-2">max workers <input type="number" min="1" max="1000" class="form-control d-inline-block w-auto" @bind="_statsAllLimit" /></label>
+    <PeriodSelect @bind-Value="_statsAllFilter" />
+    <button class="btn btn-primary ms-2" disabled="@_busy" @onclick="LoadAllStatistics">Load statistics (all)</button>
+    @if (_allStats is not null)
+    {
+        <p class="stat-totals">
+            <strong>TOTALS</strong> · required <b>@Format.Hours(_allStats.TotalRequiredMinutes)</b>
+            · worked <b>@Format.Hours(_allStats.TotalWorkedMinutes)</b>
+            · under-worked <b>@Format.Hours(_allStats.TotalUnderworkedMinutes)</b>
+        </p>
+        @foreach (var s in _allStats.PerUser) { <StatisticsCard Stats="s" /> }
+    }
+</section>
+
+@code {
+    private static readonly DayOfWeek[] AllDays =
+    [
+        DayOfWeek.Monday, DayOfWeek.Tuesday, DayOfWeek.Wednesday, DayOfWeek.Thursday,
+        DayOfWeek.Friday, DayOfWeek.Saturday, DayOfWeek.Sunday
+    ];
+
+    private long _userId = 1001;
+    private int _usersLimit = 50;
+    private int _historyAllLimit = 50;
+    private int _statsAllLimit = 50;
+    private TimeOnly _startTime = new(9, 0);
+    private TimeOnly _endTime = new(18, 0);
+    private bool _freeSchedule;
+    private readonly HashSet<DayOfWeek> _days =
+    [
+        DayOfWeek.Monday, DayOfWeek.Tuesday, DayOfWeek.Wednesday, DayOfWeek.Thursday, DayOfWeek.Friday
+    ];
+    private string _statsUserFilter = "month";              // statistics (this user)
+    private string _historyUserFilter = "month";   // history (this user)
+    private string _historyAllFilter = "month";    // history (all workers)
+    private string _statsAllFilter = "month";      // statistics (all workers)
+    private string _exclusionType = "arrive later";
+    private DateTime _exclStart = DateTime.Today.AddHours(9);
+    private DateTime _exclEnd = DateTime.Today.AddHours(18);
+    private string _deleteCardUid = "";
+    private bool _busy;
+
+    private WorkTimeResponse? _schedule;
+    private ExclusionsResponse? _exclusions;
+    private CardListResponse? _cards;
+    private HistoryResponse? _historyUser;
+    private HistoryResponse? _historyAll;
+    private UserStatisticsResponse? _stats;
+    private StatisticsSummaryResponse? _allStats;
+    private IReadOnlyList<long>? _users;
+
+    private void ToggleDay(DayOfWeek day, bool on)
+    {
+        if (on) { _days.Add(day); } else { _days.Remove(day); }
+    }
+
+    private IReadOnlyList<DayOfWeek> SelectedDays() =>
+        AllDays.Where(_days.Contains).ToArray();
+
+    // ---- Users (no list-users endpoint; discover ids via the all-workers statistics feed) ----
+    private Task ListUsers() =>
+        Run("list users", () => Api.GetStatisticsAsync(new(_usersLimit)),
+            r => { _users = r.PerUser.Select(p => p.UserId).OrderBy(id => id).ToArray(); return $"{_users.Count} users"; },
+            onFail: () => _users = null);
+
+    // ---- Schedule ----
+    private Task GetSchedule() =>
+        Run("get schedule", () => Api.GetWorkTimeAsync(new(_userId)),
+            r => { _schedule = r; return $"{r.StartTime:HH\\:mm}-{r.EndTime:HH\\:mm}"; });
+
+    private Task SetSchedule() =>
+        Run("set schedule",
+            () => Api.SetWorkTimeAsync(new(_userId, _startTime, _endTime, SelectedDays(), _freeSchedule)),
+            r => { _schedule = r; return $"set ({r.Days.Count} days)"; });
+
+    // ---- Exclusions ----
+    private Task LoadExclusions() =>
+        Run("get exclusions", () => Api.GetExclusionsAsync(new(_userId)),
+            r => { _exclusions = r; return $"{r.Exclusions.Count} exclusions"; });
+
+    private Task AddExclusion() =>
+        Run("add exclusion",
+            () => Api.AddExclusionAsync(new(_userId, _exclusionType, new DateTimeOffset(_exclStart), new DateTimeOffset(_exclEnd))),
+            r => $"{r.TypeExclusion} added");
+
+    // ---- Cards ----
+    private Task ListCards() =>
+        Run("list cards", () => Api.ListCardsByUserAsync(new(_userId)),
+            r => { _cards = r; return $"{r.Cards.Count} cards"; });
+
+    private Task DeleteCard() =>
+        Run("delete card", () => Api.DeleteCardAsync(new(_deleteCardUid)),
+            r => $"deleted {r.CardUid}");
+
+    private Task DeleteAllCards() =>
+        Run("delete all cards", () => Api.DeleteAllCardsByUserAsync(new(_userId)),
+            r => { _cards = r; return $"deleted {r.Cards.Count}"; });
+
+    // ---- History ----
+    private Task HistoryUser() =>
+        Run("history (user)", () => Api.GetHistoryByUserAsync(new(_userId, _historyUserFilter)),
+            r => { _historyUser = r; return $"{r.Entries.Count} days"; });
+
+    private Task HistoryAll() =>
+        Run("history (all)", () => Api.GetHistoryAsync(new(_historyAllLimit, _historyAllFilter)),
+            r => { _historyAll = r; return $"{r.Entries.Count} rows"; },
+            onFail: () => _historyAll = null);
+
+    // ---- Statistics ----
+    private Task LoadStatistics() =>
+        Run("stats (user)", () => Api.GetStatisticsByUserAsync(new(_userId, _statsUserFilter)),
+            r => { _stats = r; return $"worked {Format.Hours(r.WorkedMinutes)}"; });
+
+    private Task LoadAllStatistics() =>
+        Run("stats (all)", () => Api.GetStatisticsAsync(new(_statsAllLimit, _statsAllFilter)),
+            r => { _allStats = r; return $"{r.PerUser.Count} users"; },
+            onFail: () => _allStats = null);
+
+    // Shared runner: success → describe + log; failure → run onFail (e.g. clear stale data) + log.
+    private async Task Run<T>(string label, Func<Task<ApiResult<T>>> call, Func<T, string> onOk, Action? onFail = null)
+    {
+        if (_busy) { return; }
+        _busy = true;
+        try
+        {
+            var result = await call();
+            if (result.IsSuccess)
+            {
+                Log.Add($"{label}: OK — {onOk(result.Value!)}");
+            }
+            else
+            {
+                onFail?.Invoke();
+                Log.Add($"{label}: FAILED [{result.StatusCode}] {result.ErrorMessage}");
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

@@ -1,0 +1,30 @@
+@implements IDisposable
+@inject RequestLog Log
+
+<div class="request-log">
+    <div class="request-log-head">
+        <span class="request-log-title"><span class="live-dot"></span> Request Log</span>
+        <button class="btn btn-outline-secondary" @onclick="Log.Clear">Clear</button>
+    </div>
+    @if (Log.Lines.Count == 0)
+    {
+        <p class="text-muted mb-0"><em>No requests yet.</em></p>
+    }
+    else
+    {
+        <ol class="request-log-lines">
+            @foreach (var line in Log.Lines)
+            {
+                <li class="@(line.Contains("FAILED") ? "log-fail" : "log-ok")">@line</li>
+            }
+        </ol>
+    }
+</div>
+
+@code {
+    protected override void OnInitialized() => Log.Changed += OnChanged;
+
+    private void OnChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose() => Log.Changed -= OnChanged;
+}
